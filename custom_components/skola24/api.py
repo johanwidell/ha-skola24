@@ -194,8 +194,10 @@ class Skola24Api:
                 allow_redirects=True,
             ) as resp:
                 _LOGGER.debug(
-                    "Municipality root resolved to %s (HTTP %s)",
-                    resp.url, resp.status,
+                    "Step 0 done — landed on %s (HTTP %s) | cookies: %s",
+                    resp.url,
+                    resp.status,
+                    _cookie_names(self._session),
                 )
         except aiohttp.ClientError as exc:
             raise Skola24AuthError(
@@ -224,6 +226,10 @@ class Skola24Api:
                         f"Login page returned HTTP {resp.status}"
                     )
                 html = await resp.text()
+                _LOGGER.debug(
+                    "Step 1 done — login page OK | cookies: %s",
+                    _cookie_names(self._session),
+                )
         except aiohttp.ClientError as exc:
             raise Skola24AuthError(f"Could not reach login page: {exc}") from exc
 
@@ -309,14 +315,32 @@ class Skola24Api:
         except aiohttp.ClientError as exc:
             raise Skola24AuthError(f"Login POST failed: {exc}") from exc
 
-        _LOGGER.debug("Login redirect landed on %s (HTTP %s)", final_url, final_status)
+        _LOGGER.debug(
+            "Step 2 done — POST landed on %s (HTTP %s) | cookies: %s",
+            final_url,
+            final_status,
+            _cookie_names(self._session),
+        )
+
+        # Detect obvious login failure: server bounced us back to the login page
+        if "login.aspx" in final_url.lower() or "authentication" in final_url.lower():
+            _LOGGER.error(
+                "Login POST redirected back to login page (%s) — "
+                "credentials are likely wrong or the form changed.",
+                final_url,
+            )
+            raise Skola24AuthError(
+                "Login failed — server redirected back to login page. "
+                "Check username and password."
+            )
 
         # ---- Step 3: Validate session by calling /api/get/user/info ------
         info = await self._get_user_info_raw()
         if info is None:
             raise Skola24AuthError(
-                "Credentials were accepted by the form but the session "
-                "is not valid — check username/password"
+                "Login POST appeared to succeed (landed on "
+                f"{final_url}) but /api/get/user/info returned no session. "
+                "Cookies in jar: " + str(_cookie_names(self._session))
             )
 
         self._authenticated = True
@@ -325,6 +349,7 @@ class Skola24Api:
     async def _get_user_info_raw(self) -> dict | None:
         """
         Call POST /api/get/user/info; parse and cache session expiry.
+        Logs the full response on failure for diagnostics.
 
         Confirmed response structure (from DevTools):
         {
@@ -343,9 +368,29 @@ class Skola24Api:
         the response envelope.  Session duration is ~1 hour.
         """
         try:
-            resp_json = await self._post(EP_USER_INFO, None)
-        except (Skola24AuthError, Skola24ApiError) as exc:
-            _LOGGER.debug("user/info failed (expected during auth probe): %s", exc)
+            url = f"{BASE_URL}{EP_USER_INFO}"
+            async with self._session.post(
+                url,
+                data=b"null",
+                headers=self._auth_headers,
+            ) as resp:
+                _LOGGER.debug(
+                    "user/info → HTTP %s | cookies sent: %s",
+                    resp.status,
+                    _cookie_names(self._session),
+                )
+                if resp.status != 200:
+                    body = await resp.text()
+                    _LOGGER.error(
+                        "user/info returned HTTP %s — body: %s",
+                        resp.status,
+                        body[:300],
+                    )
+                    return None
+                resp_json = await resp.json(content_type=None)
+                _LOGGER.debug("user/info response: %s", resp_json)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("user/info exception: %s", exc)
             return None
 
         # Parse session expiry from root-level field
@@ -556,6 +601,14 @@ def _find_input_name(html: str, partial: str) -> str | None:
     pattern = rf'<input[^>]+name="([^"]*{re.escape(partial)}[^"]*)"'
     m = re.search(pattern, html, re.IGNORECASE)
     return m.group(1) if m else None
+
+
+def _cookie_names(session: aiohttp.ClientSession) -> list[str]:
+    """Return list of cookie names currently in the session jar (no values)."""
+    try:
+        return sorted({m.key for m in session.cookie_jar})
+    except Exception:  # noqa: BLE001
+        return ["(could not read jar)"]
 
 
 def _find_submit_name(html: str) -> str | None:
