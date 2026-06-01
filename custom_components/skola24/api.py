@@ -171,6 +171,37 @@ class Skola24Api:
         municipality_origin = f"https://{self._host}"
         login_url = f"{municipality_origin}{LOGIN_PATH}?host={self._host}"
 
+        # ---- Step 0: GET municipality root to obtain ASP.NET_SessionId ---
+        # Confirmed by curl tracing: the ROOT of https://uppsala.skola24.se/
+        # returns a 302 that sets ASP.NET_SessionId with domain=.skola24.se.
+        # This cookie is required for the login POST to succeed.
+        # Skipping straight to the login page bypasses this step entirely.
+        _LOGGER.debug(
+            "Fetching municipality root to establish ASP.NET session: %s/",
+            municipality_origin,
+        )
+        try:
+            async with self._session.get(
+                f"{municipality_origin}/",
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                },
+                allow_redirects=True,
+            ) as resp:
+                _LOGGER.debug(
+                    "Municipality root resolved to %s (HTTP %s)",
+                    resp.url, resp.status,
+                )
+        except aiohttp.ClientError as exc:
+            raise Skola24AuthError(
+                f"Could not reach municipality host {self._host}: {exc}"
+            ) from exc
+
         # ---- Step 1: GET login page → sets session + tenant cookies -----
         _LOGGER.debug("Fetching login page: %s", login_url)
         try:
