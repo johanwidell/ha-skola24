@@ -1,0 +1,11 @@
+{
+  "domain": "skola24",
+  "name": "Skola24",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/local/ha-skola24",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "1.0.0"
+}

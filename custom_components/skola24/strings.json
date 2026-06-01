@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Skola24 – Inloggning",
+        "description": "Ange din skolas Skola24-adress och dina inloggningsuppgifter.",
+        "data": {
+          "host": "Skola24-host (t.ex. uppsala.skola24.se)",
+          "username": "Användarnamn",
+          "password": "Lösenord"
+        }
+      },
+      "selection": {
+        "title": "Skola24 – Schema",
+        "description": "Välj hur schemat ska hämtas. {pin_hint}  {class_hint}",
+        "data": {
+          "selection_type": "Schematyp",
+          "selection_value": "Personnummer eller klass"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Skola24 – Förnya inloggning",
+        "description": "Sessionen har gått ut. Logga in igen.",
+        "data": {
+          "username": "Användarnamn",
+          "password": "Lösenord"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Fel användarnamn eller lösenord.",
+      "cannot_connect": "Kunde inte ansluta till Skola24. Kontrollera hostadressen.",
+      "invalid_pin": "Personnumret verkar felaktigt. Använd formatet ÅÅMMDD-XXXX.",
+      "unknown": "Oväntat fel. Se hemassistentens logg."
+    },
+    "abort": {
+      "already_configured": "Skola24 är redan konfigurerat.",
+      "reauth_successful": "Inloggning förnyad."
+    }
+  }
+}
