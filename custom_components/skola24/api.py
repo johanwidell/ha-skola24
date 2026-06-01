@@ -342,26 +342,18 @@ class Skola24Api:
             _cookie_names(self._session),
         )
 
-        # Detect login failure based on where we landed.
-        # DefaultErrorPage = ASP.NET unhandled exception in login.aspx
-        #   (can be wrong credentials OR infra issue — try user/info anyway)
-        # login.aspx = server returned us back to the form (also wrong creds)
+        # Detect login failure.
+        # Confirmed by testing: Skola24 redirects to DefaultErrorPage for
+        # WRONG CREDENTIALS (not a genuine ASP.NET crash). A totally fake
+        # username/password gives the same DefaultErrorPage as a wrong-password
+        # attempt for a real user. The login page never shows an inline error.
         if "defaulterrorpage" in final_url.lower():
-            _LOGGER.warning(
-                "Login POST landed on DefaultErrorPage (%s) — "
-                "this often means wrong credentials. "
-                "Will still probe user/info to check.",
-                final_url,
+            raise Skola24AuthError(
+                "Fel användarnamn eller lösenord "
+                "(wrong username or password — Skola24 returns DefaultErrorPage "
+                "for invalid credentials)."
             )
-            # Don't raise here — fall through to user/info validation below.
-            # If the session was actually established despite the error page
-            # (e.g. the redirect is just cosmetic), user/info will confirm it.
         elif "login.aspx" in final_url.lower():
-            _LOGGER.error(
-                "Login POST redirected back to login.aspx (%s) — "
-                "credentials are wrong.",
-                final_url,
-            )
             raise Skola24AuthError(
                 "Login failed — server redirected back to login page. "
                 "Check username and password."
@@ -371,9 +363,9 @@ class Skola24Api:
         info = await self._get_user_info_raw()
         if info is None:
             raise Skola24AuthError(
-                f"Login failed. POST landed on: {final_url}. "
-                f"Cookies: {_cookie_names(self._session)}. "
-                "Check credentials, or the corporate proxy may be interfering."
+                f"Login POST succeeded (landed on {final_url}) but "
+                "/api/get/user/info returned no valid session. "
+                "This is unexpected — please report with debug logs."
             )
 
         self._authenticated = True
