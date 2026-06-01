@@ -306,6 +306,16 @@ class Skola24Api:
         }
 
         # ---- Step 2: POST credentials ------------------------------------
+        # Log exactly which cookies aiohttp will send with this POST.
+        # filter_cookies() shows what the jar will inject into Cookie header.
+        from yarl import URL as _URL
+        _filtered = self._session.cookie_jar.filter_cookies(_URL(login_url))
+        _LOGGER.debug(
+            "Cookies that aiohttp will send in POST: %s",
+            {k: v.value[:20] + "…" if len(v.value) > 20 else v.value
+             for k, v in _filtered.items()},
+        )
+
         # Origin and Referer must match the municipality host, not web.skola24.se
         _LOGGER.debug("Posting login credentials for user '%s'", username)
         try:
