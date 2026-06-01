@@ -211,27 +211,42 @@ class Skola24Api:
                 "Could not parse login page — page structure may have changed"
             )
 
-        # Find actual field names (ASP.NET generates long ids like
-        # ctl00$ContentPlaceHolder1$txtUserName)
+        # Find actual field names by searching for known partials.
+        # Confirmed field names from live page (2026-06-01):
+        #   LoginUC$UserNameTB, LoginUC$PwdTB, LoginUC$LoginButton
         user_field = (
-            _find_input_name(html, "txtUserName")
-            or "ctl00$ContentPlaceHolder1$txtUserName"
+            _find_input_name(html, "UserNameTB")
+            or _find_input_name(html, "txtUserName")
+            or "LoginUC$UserNameTB"
         )
         pass_field = (
-            _find_input_name(html, "txtPassword")
-            or "ctl00$ContentPlaceHolder1$txtPassword"
+            _find_input_name(html, "PwdTB")
+            or _find_input_name(html, "txtPassword")
+            or "LoginUC$PwdTB"
         )
-        submit_field = _find_input_name(html, "btn") or ""
+        submit_field = (
+            _find_submit_name(html)
+            or "LoginUC$LoginButton"
+        )
+        post_id = _extract_hidden(html, "__POST_ID") or "0"
+
+        _LOGGER.debug(
+            "Login form fields — user: %s  pass: %s  submit: %s",
+            user_field, pass_field, submit_field,
+        )
 
         form: dict[str, str] = {
+            "__EVENTTARGET": "",
+            "__EVENTARGUMENT": "",
+            "__LASTFOCUS": "",
+            "__POST_ID": post_id,
             "__VIEWSTATE": viewstate,
             "__VIEWSTATEGENERATOR": viewstate_gen or "",
             "__EVENTVALIDATION": event_validation or "",
             user_field: username,
             pass_field: password,
+            submit_field: "Logga in",
         }
-        if submit_field:
-            form[submit_field] = "Logga in"
 
         # ---- Step 2: POST credentials ------------------------------------
         # Origin and Referer must match the municipality host, not web.skola24.se
@@ -509,6 +524,18 @@ def _find_input_name(html: str, partial: str) -> str | None:
     """Find the full `name` attribute of an input whose name contains `partial`."""
     pattern = rf'<input[^>]+name="([^"]*{re.escape(partial)}[^"]*)"'
     m = re.search(pattern, html, re.IGNORECASE)
+    return m.group(1) if m else None
+
+
+def _find_submit_name(html: str) -> str | None:
+    """Find the `name` of the first submit button/input on the page."""
+    pattern = r'<input[^>]+type=["\']submit["\'][^>]+name="([^"]+)"'
+    m = re.search(pattern, html, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    # Also try name-before-type ordering
+    pattern2 = r'<input[^>]+name="([^"]+)"[^>]+type=["\']submit["\']'
+    m = re.search(pattern2, html, re.IGNORECASE)
     return m.group(1) if m else None
 
 
