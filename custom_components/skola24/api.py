@@ -181,6 +181,16 @@ class Skola24Api:
             municipality_origin,
         )
         try:
+            # allow_redirects=False is intentional!
+            #
+            # The root 302 from https://uppsala.skola24.se/ sets
+            # ASP.NET_SessionId and legacyuicookiestd with domain=.skola24.se.
+            # That first response is all we need.
+            #
+            # If we follow redirects the chain continues to www.skola24.se
+            # which sets a NEW ASP.NET_SessionId for a different application.
+            # That overwrites the Uppsala session ID, causing a ViewState MAC
+            # mismatch when we later POST the login form → DefaultErrorPage.
             async with self._session.get(
                 f"{municipality_origin}/",
                 headers={
@@ -191,11 +201,10 @@ class Skola24Api:
                     ),
                     "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
                 },
-                allow_redirects=True,
+                allow_redirects=False,
             ) as resp:
                 _LOGGER.debug(
-                    "Step 0 done — landed on %s (HTTP %s) | cookies: %s",
-                    resp.url,
+                    "Step 0 done — HTTP %s, cookies: %s",
                     resp.status,
                     _cookie_names(self._session),
                 )
