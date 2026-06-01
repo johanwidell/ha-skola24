@@ -286,6 +286,12 @@ class Skola24Api:
             user_field, pass_field, submit_field, raw_post_id, post_id,
         )
 
+        # Skola24 appears to have a bot-detection timing check:
+        # form submissions arriving < ~1 s after page load throw DefaultErrorPage.
+        # A real user takes 2–10 s to enter credentials. We wait 2 s to pass the check.
+        _LOGGER.debug("Waiting 2 s before POST (bot-detection timing workaround)")
+        await asyncio.sleep(2)
+
         form: dict[str, str] = {
             "__EVENTTARGET": "",
             "__EVENTARGUMENT": "",
