@@ -292,50 +292,74 @@ class Skola24Api:
         _LOGGER.debug("Waiting 2 s before POST (bot-detection timing workaround)")
         await asyncio.sleep(2)
 
-        form: dict[str, str] = {
-            "__EVENTTARGET": "",
-            "__EVENTARGUMENT": "",
-            "__LASTFOCUS": "",
-            "__POST_ID": post_id,
-            "__VIEWSTATE": viewstate,
-            "__VIEWSTATEGENERATOR": viewstate_gen or "",
-            "__EVENTVALIDATION": event_validation or "",
-            user_field: username,
-            pass_field: password,
-            submit_field: "Logga in",
-        }
+        # Build form as ordered list to match HTML field order exactly.
+        # Bypass aiohttp's FormData encoder — use urllib.parse.urlencode directly
+        # so encoding is identical to what browser sends (quote_plus for values,
+        # $ left unencoded in names to match browser behavior).
+        import urllib.parse as _urlparse
+        form_pairs: list[tuple[str, str]] = [
+            ("__EVENTTARGET", ""),
+            ("__EVENTARGUMENT", ""),
+            ("__LASTFOCUS", ""),
+            ("__POST_ID", post_id),
+            ("__VIEWSTATE", viewstate),
+            ("LoginUC$UserNameTB", username),
+            ("LoginUC$PwdTB", password),
+            ("LoginUC$LoginButton", "Logga in"),
+            ("__VIEWSTATEGENERATOR", viewstate_gen or ""),
+            ("__EVENTVALIDATION", event_validation or ""),
+        ]
+        # Encode: field names keep $ unencoded (safe='$'), values use quote_plus
+        encoded_parts = []
+        for k, v in form_pairs:
+            ek = _urlparse.quote(k, safe="$")
+            ev = _urlparse.quote_plus(v)
+            encoded_parts.append(f"{ek}={ev}")
+        encoded_body = "&".join(encoded_parts).encode("ascii")
 
         # ---- Step 2: POST credentials ------------------------------------
-        # Log exactly which cookies aiohttp will send with this POST.
-        # filter_cookies() shows what the jar will inject into Cookie header.
+        # Log what cookies aiohttp will inject and the body size.
         from yarl import URL as _URL
         _filtered = self._session.cookie_jar.filter_cookies(_URL(login_url))
         _LOGGER.debug(
-            "Cookies that aiohttp will send in POST: %s",
-            {k: v.value[:20] + "…" if len(v.value) > 20 else v.value
-             for k, v in _filtered.items()},
+            "POST body: %d bytes | Cookies: %s",
+            len(encoded_body),
+            list(_filtered.keys()),
         )
 
-        # Origin and Referer must match the municipality host, not web.skola24.se
         _LOGGER.debug("Posting login credentials for user '%s'", username)
         try:
             async with self._session.post(
                 login_url,
-                data=form,
+                data=encoded_body,
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
+                    "Content-Length": str(len(encoded_body)),
                     "Origin": municipality_origin,
                     "Referer": login_url,
                     "Upgrade-Insecure-Requests": "1",
+                    "Cache-Control": "max-age=0",
                     "User-Agent": (
                         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
+                        "Chrome/148.0.0.0 Safari/537.36"
                     ),
                     "Accept": (
                         "text/html,application/xhtml+xml,application/xml;"
-                        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+                        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,"
+                        "application/signed-exchange;v=b3;q=0.7"
                     ),
+                    "Accept-Language": "sv-SE,sv;q=0.9,en;q=0.8",
+                    "sec-ch-ua": (
+                        '"Chromium";v="148", "Google Chrome";v="148", '
+                        '"Not/A)Brand";v="99"'
+                    ),
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"macOS"',
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "same-origin",
+                    "Sec-Fetch-User": "?1",
                 },
                 allow_redirects=True,
                 max_redirects=10,
