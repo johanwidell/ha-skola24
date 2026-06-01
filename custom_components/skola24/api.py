@@ -274,11 +274,16 @@ class Skola24Api:
             _find_submit_name(html)
             or "LoginUC$LoginButton"
         )
-        post_id = _extract_hidden(html, "__POST_ID") or "0"
+        # The login page's OnSubmit() JS increments __POST_ID before the form
+        # is submitted (window.onload sets it to 0, onsubmit adds 1 → sends 1).
+        # Sending the raw HTML value (0) triggers an ASP.NET exception because
+        # the server uses this as an anti-bot / double-submit guard.
+        raw_post_id = int(_extract_hidden(html, "__POST_ID") or "0")
+        post_id = str(raw_post_id + 1)
 
         _LOGGER.debug(
-            "Login form fields — user: %s  pass: %s  submit: %s",
-            user_field, pass_field, submit_field,
+            "Login form fields — user: %s  pass: %s  submit: %s  __POST_ID: %s→%s",
+            user_field, pass_field, submit_field, raw_post_id, post_id,
         )
 
         form: dict[str, str] = {
@@ -331,11 +336,24 @@ class Skola24Api:
             _cookie_names(self._session),
         )
 
-        # Detect obvious login failure: server bounced us back to the login page
-        if "login.aspx" in final_url.lower() or "authentication" in final_url.lower():
+        # Detect login failure based on where we landed.
+        # DefaultErrorPage = ASP.NET unhandled exception in login.aspx
+        #   (can be wrong credentials OR infra issue — try user/info anyway)
+        # login.aspx = server returned us back to the form (also wrong creds)
+        if "defaulterrorpage" in final_url.lower():
+            _LOGGER.warning(
+                "Login POST landed on DefaultErrorPage (%s) — "
+                "this often means wrong credentials. "
+                "Will still probe user/info to check.",
+                final_url,
+            )
+            # Don't raise here — fall through to user/info validation below.
+            # If the session was actually established despite the error page
+            # (e.g. the redirect is just cosmetic), user/info will confirm it.
+        elif "login.aspx" in final_url.lower():
             _LOGGER.error(
-                "Login POST redirected back to login page (%s) — "
-                "credentials are likely wrong or the form changed.",
+                "Login POST redirected back to login.aspx (%s) — "
+                "credentials are wrong.",
                 final_url,
             )
             raise Skola24AuthError(
@@ -347,9 +365,9 @@ class Skola24Api:
         info = await self._get_user_info_raw()
         if info is None:
             raise Skola24AuthError(
-                "Login POST appeared to succeed (landed on "
-                f"{final_url}) but /api/get/user/info returned no session. "
-                "Cookies in jar: " + str(_cookie_names(self._session))
+                f"Login failed. POST landed on: {final_url}. "
+                f"Cookies: {_cookie_names(self._session)}. "
+                "Check credentials, or the corporate proxy may be interfering."
             )
 
         self._authenticated = True
