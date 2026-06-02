@@ -616,7 +616,15 @@ class Skola24Api:
         `_iso_year` and `_iso_week` keys).
         """
         render_key = await self.get_render_key()
-        encrypted = await self.get_encrypted_signature(selection_raw)
+
+        # selectionType=4 (PIN): encrypt the personnummer
+        # selectionType=0 (class): use the groupGuid PLAIN — no encryption!
+        # (confirmed from TekniskSupport reference implementation)
+        from .const import SELECTION_TYPE_PIN
+        if selection_type == SELECTION_TYPE_PIN:
+            selection_value = await self.get_encrypted_signature(selection_raw)
+        else:
+            selection_value = selection_raw
 
         week_range = _week_window(weeks_past, weeks_future)
         lessons: list[dict] = []
@@ -636,7 +644,7 @@ class Skola24Api:
                     "height": 550,
                     "schoolYear": school_year,
                     "selectionType": selection_type,
-                    "selection": encrypted,
+                    "selection": selection_value,
                     "showHeader": False,
                     "periodText": "",
                     "week": iso_week,
