@@ -10,6 +10,13 @@
           "password": "Lösenord"
         }
       },
+      "school": {
+        "title": "Skola24 – Välj skola",
+        "description": "Välj barnets skola ({count} enheter hittades).",
+        "data": {
+          "unit_guid": "Skola"
+        }
+      },
       "selection": {
         "title": "Skola24 – Schema",
         "description": "Välj hur schemat ska hämtas. {pin_hint}  {class_hint}",

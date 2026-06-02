@@ -8,7 +8,7 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_SELECTION_TYPE = "selection_type"
 CONF_SELECTION_VALUE = "selection_value"
-CONF_UNIT_GUID = "unit_guid"
+CONF_UNIT_GUID   = "unit_guid"
 CONF_SCHOOL_NAME = "school_name"
 
 # Selection types (matches Skola24 API selectionType)
