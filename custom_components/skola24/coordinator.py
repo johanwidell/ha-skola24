@@ -88,34 +88,113 @@ class Skola24Coordinator(DataUpdateCoordinator):
                 self._api.session_expires_at,
             )
 
+    async def _probe_best_unit(
+        self, units: list[dict], school_year: str | None
+    ) -> str:
+        """
+        Try each unit and return the GUID of the first one that yields lessons.
+
+        Falls back to the first unit if none return lessons (e.g. summer break).
+        """
+        from .const import SELECTION_TYPE_CLASS
+
+        if school_year is None:
+            try:
+                school_year = await self._api.get_school_year()
+            except Exception:  # noqa: BLE001
+                school_year = ""
+
+        selection_raw = self._selection_value
+        for unit in units:
+            guid = unit.get("unitGuid", "")
+            if not guid:
+                continue
+            try:
+                raw = self._selection_value
+                if self._selection_type == SELECTION_TYPE_CLASS:
+                    try:
+                        raw = await self._api.get_class_guid(guid, self._selection_value)
+                    except Exception:  # noqa: BLE001
+                        continue   # class not in this unit → skip
+                render_key = await self._api.get_render_key()
+                encrypted  = await self._api.get_encrypted_signature(raw)
+                from .api import EP_RENDER, BASE_URL
+                resp = await self._api._post(
+                    EP_RENDER,
+                    {
+                        "renderKey": render_key,
+                        "host": self._api._host,
+                        "unitGuid": guid,
+                        "startDate": None, "endDate": None,
+                        "scheduleDay": 0, "blackAndWhite": False,
+                        "width": 1223, "height": 550,
+                        "schoolYear": school_year,
+                        "selectionType": self._selection_type,
+                        "selection": encrypted,
+                        "showHeader": False, "periodText": "",
+                        "week": __import__("datetime").date.today().isocalendar()[1],
+                        "year": __import__("datetime").date.today().isocalendar()[0],
+                        "privateFreeTextMode": False,
+                        "privateSelectionMode": None, "customerKey": "",
+                    },
+                    authenticated=False,
+                )
+                lessons = (resp.get("data") or {}).get("lessonInfo") or []
+                _LOGGER.debug(
+                    "  Probe unit '%s': %d lessons",
+                    unit.get("unitId", guid), len(lessons),
+                )
+                if lessons:
+                    return guid
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("  Probe unit '%s' error: %s", unit.get("unitId"), exc)
+
+        _LOGGER.warning(
+            "No unit returned lessons (may be summer break). Using first unit."
+        )
+        return units[0]["unitGuid"]
+
     async def _async_update_data(self) -> list[dict]:
         """Fetch fresh timetable data."""
         try:
             await self._ensure_authenticated()
 
-            # Resolve unit GUID once (cached after first run).
-            # Log ALL available units so users can identify the correct school.
+            # Resolve unit GUID.
+            # If unit_guid is already configured (from config entry), use it.
+            # Otherwise: try ALL units and use whichever one yields lessons
+            # (avoids always picking the wrong "first" unit in multi-school setups).
+            from .const import SELECTION_TYPE_CLASS
+
             if not self._unit_guid:
                 units = await self._api.get_units()
                 _LOGGER.info(
                     "Available school units for %s (%d total):",
-                    self._api._host,
-                    len(units),
+                    self._api._host, len(units),
                 )
                 for u in units:
                     _LOGGER.info(
-                        "  unitId=%-30s  unitGuid=%s",
-                        u.get("unitId", "?"),
-                        u.get("unitGuid", "?"),
+                        "  unitId=%-35s  unitGuid=%s",
+                        u.get("unitId", "?"), u.get("unitGuid", "?"),
                     )
-                # Use first unit — user can override via CONF_UNIT_GUID in config
-                self._unit_guid = units[0]["unitGuid"] if units else None
-                if not self._unit_guid:
-                    raise Skola24ApiError("No school units returned for host")
-                _LOGGER.info("Using unitGuid: %s", self._unit_guid)
 
-            # Also resolve class name → class GUID for class-based selection
-            from .const import SELECTION_TYPE_CLASS
+                if not units:
+                    raise Skola24ApiError("No school units returned for host")
+
+                if len(units) == 1:
+                    self._unit_guid = units[0]["unitGuid"]
+                    _LOGGER.info("Single unit — using: %s", self._unit_guid)
+                else:
+                    # Multiple units: try each until one returns lessons.
+                    # Cache the winning unit so we don't repeat this every update.
+                    _LOGGER.info(
+                        "Multiple units found — probing each to find the right school…"
+                    )
+                    self._unit_guid = await self._probe_best_unit(
+                        units, school_year=None
+                    )
+                    _LOGGER.info("Best unit found: %s", self._unit_guid)
+
+            # Resolve class name → class GUID for class-based selection
             selection_raw = self._selection_value
             if self._selection_type == SELECTION_TYPE_CLASS:
                 try:
@@ -124,8 +203,7 @@ class Skola24Coordinator(DataUpdateCoordinator):
                     )
                     _LOGGER.debug(
                         "Class '%s' resolved to GUID: %s",
-                        self._selection_value,
-                        selection_raw,
+                        self._selection_value, selection_raw,
                     )
                 except Exception as exc:  # noqa: BLE001
                     _LOGGER.warning(
