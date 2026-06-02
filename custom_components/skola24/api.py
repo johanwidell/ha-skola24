@@ -292,6 +292,14 @@ class Skola24Api:
         _LOGGER.debug("Waiting 2 s before POST (bot-detection timing workaround)")
         await asyncio.sleep(2)
 
+        # Extract DomainDropDown selected value — the browser always submits this.
+        # The dropdown lists all Skola24 municipalities; the selected option
+        # matches the ?host= parameter (e.g. value="81" for Uppsala).
+        # We were NOT sending this field before, which may have caused the server
+        # to reject the login even with correct credentials.
+        domain_value = _extract_selected_domain(html)
+        _LOGGER.debug("DomainDropDown selected value: %s", domain_value)
+
         # Build form as ordered list to match HTML field order exactly.
         # Bypass aiohttp's FormData encoder — use urllib.parse.urlencode directly
         # so encoding is identical to what browser sends (quote_plus for values,
@@ -303,6 +311,7 @@ class Skola24Api:
             ("__LASTFOCUS", ""),
             ("__POST_ID", post_id),
             ("__VIEWSTATE", viewstate),
+            ("DomainDropDown", domain_value),
             ("LoginUC$UserNameTB", username),
             ("LoginUC$PwdTB", password),
             ("LoginUC$LoginButton", "Logga in"),
@@ -660,6 +669,32 @@ def _find_input_name(html: str, partial: str) -> str | None:
     pattern = rf'<input[^>]+name="([^"]*{re.escape(partial)}[^"]*)"'
     m = re.search(pattern, html, re.IGNORECASE)
     return m.group(1) if m else None
+
+
+def _extract_selected_domain(html: str) -> str:
+    """
+    Extract the value of the selected option in the DomainDropDown.
+
+    The login page has a <select name="DomainDropDown"> with hundreds of
+    municipalities. The server pre-selects the one matching ?host=.
+    The browser always submits this field; we must too.
+
+    Returns the numeric value (e.g. "81" for Uppsala) or "-1" as fallback.
+    """
+    m = re.search(
+        r'<option\s+selected(?:="selected")?\s+value="([^"]+)"',
+        html,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1)
+    # Alternate attribute order: value before selected
+    m = re.search(
+        r'<option\s+value="([^"]+)"\s+selected(?:="selected")?',
+        html,
+        re.IGNORECASE,
+    )
+    return m.group(1) if m else "-1"
 
 
 def _cookie_names(session: aiohttp.ClientSession) -> list[str]:
