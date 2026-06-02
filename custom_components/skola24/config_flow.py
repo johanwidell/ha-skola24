@@ -220,8 +220,10 @@ async def _make_session(hass) -> aiohttp.ClientSession:
       TCPConnector (SSL enabled by default). Passing one from HA's
       event loop can cause "connector owner" errors on session close.
     """
+    # quote_cookie=False: prevents Python's http.cookies from wrapping
+    # cookie values in double-quotes, which breaks ASP.NET tenant validation.
     return aiohttp.ClientSession(
-        cookie_jar=aiohttp.CookieJar(),
+        cookie_jar=aiohttp.CookieJar(quote_cookie=False),
     )
 
 

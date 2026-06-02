@@ -32,11 +32,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # HA's shared session uses DummyCookieJar (discards cookies),
     # but we need cookies for ASP.NET session-based auth.
     #
-    # Skola24 login is on uppsala.skola24.se; the API is on web.skola24.se.
-    # The server sets Domain=.skola24.se so the standard RFC CookieJar
-    # forwards cookies across subdomains — no unsafe=True needed.
+    # CRITICAL: quote_cookie=False is REQUIRED.
+    # Python's http.cookies module quotes cookie values that contain /, =, !
+    # by wrapping them in double-quotes. For example:
+    #   s24_tenant="voQ2/UrYhHCgeYxp8KoL..."  ← Python adds the quotes
+    # ASP.NET receives the quotes as part of the value → tenant validation
+    # fails → DefaultErrorPage, even with correct credentials.
+    # quote_cookie=False sends the raw value as the browser does.
     session = aiohttp.ClientSession(
-        cookie_jar=aiohttp.CookieJar(),
+        cookie_jar=aiohttp.CookieJar(quote_cookie=False),
     )
 
     coordinator = Skola24Coordinator(hass, session, dict(entry.data))
