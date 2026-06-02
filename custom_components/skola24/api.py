@@ -106,7 +106,14 @@ class Skola24Api:
 
     @property
     def _public_headers(self) -> dict[str, str]:
-        """Headers for unauthenticated public timetable viewer endpoints."""
+        """
+        Headers for timetable API endpoints (X_SCOPE_PUBLIC).
+
+        These endpoints were originally unauthenticated (public timetable
+        viewer). After login the session cookies in the jar are automatically
+        added by aiohttp, which grants the 'authorized user' permission
+        that otherwise causes error 9005.
+        """
         return {
             "Content-Type": "application/json",
             "X-Scope": X_SCOPE_PUBLIC,
@@ -122,8 +129,13 @@ class Skola24Api:
         """
         POST to BASE_URL + path.
 
-        body=None sends JSON `null` (Content-Length: 4), which several
-        Skola24 endpoints expect for no-payload calls.
+        authenticated=True  → X_SCOPE_AUTH  (portal API: user/info etc.)
+        authenticated=False → X_SCOPE_PUBLIC (timetable API: units, render etc.)
+
+        In both cases the session cookies from the cookie jar are sent
+        automatically by aiohttp (cookie_jar is shared across all requests).
+
+        body=None sends JSON `null` (Content-Length: 4).
         """
         headers = self._auth_headers if authenticated else self._public_headers
         raw = json.dumps(body)          # None → "null", {} → "{}"
@@ -500,6 +512,7 @@ class Skola24Api:
         resp = await self._post(
             EP_UNITS,
             {"getTimetableViewerUnitsRequest": {"hostName": self._host}},
+            authenticated=False,
         )
         try:
             return resp["data"]["getTimetableViewerUnitsResponse"]["units"]
@@ -531,6 +544,7 @@ class Skola24Api:
         resp = await self._post(
             EP_SCHOOL_YEARS,
             {"hostName": self._host, "checkSchoolYearsFeature": False},
+            authenticated=False,
         )
         try:
             return resp["data"]["activeSchoolYears"][0]["guid"]
@@ -539,7 +553,7 @@ class Skola24Api:
 
     async def get_render_key(self) -> str:
         """Fetch a one-time render key required by /api/render/timetable."""
-        resp = await self._post(EP_RENDER_KEY, None)
+        resp = await self._post(EP_RENDER_KEY, None, authenticated=False)
         try:
             return resp["data"]["key"]
         except (KeyError, TypeError) as exc:
@@ -552,7 +566,7 @@ class Skola24Api:
         Skola24 requires all selection values to be encrypted before
         passing them to the render endpoint.
         """
-        resp = await self._post(EP_ENCRYPT, {"signature": raw_signature})
+        resp = await self._post(EP_ENCRYPT, {"signature": raw_signature}, authenticated=False)
         try:
             return resp["data"]["signature"]
         except (KeyError, TypeError) as exc:
@@ -567,6 +581,7 @@ class Skola24Api:
                 "unitGuid": unit_guid,
                 "filters": {"class": True},
             },
+            authenticated=False,
         )
         try:
             return resp["data"]["classes"]
@@ -630,6 +645,7 @@ class Skola24Api:
                     "privateSelectionMode": None,
                     "customerKey": "",
                 },
+                authenticated=False,
             )
             lesson_info = (resp.get("data") or {}).get("lessonInfo") or []
             for lesson in lesson_info:
