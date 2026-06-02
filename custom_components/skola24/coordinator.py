@@ -93,15 +93,52 @@ class Skola24Coordinator(DataUpdateCoordinator):
         try:
             await self._ensure_authenticated()
 
-            # Resolve unit GUID once (cached after first run)
+            # Resolve unit GUID once (cached after first run).
+            # Log ALL available units so users can identify the correct school.
             if not self._unit_guid:
-                self._unit_guid = await self._api.get_unit_guid()
+                units = await self._api.get_units()
+                _LOGGER.info(
+                    "Available school units for %s (%d total):",
+                    self._api._host,
+                    len(units),
+                )
+                for u in units:
+                    _LOGGER.info(
+                        "  unitId=%-30s  unitGuid=%s",
+                        u.get("unitId", "?"),
+                        u.get("unitGuid", "?"),
+                    )
+                # Use first unit — user can override via CONF_UNIT_GUID in config
+                self._unit_guid = units[0]["unitGuid"] if units else None
+                if not self._unit_guid:
+                    raise Skola24ApiError("No school units returned for host")
+                _LOGGER.info("Using unitGuid: %s", self._unit_guid)
+
+            # Also resolve class name → class GUID for class-based selection
+            from .const import SELECTION_TYPE_CLASS
+            selection_raw = self._selection_value
+            if self._selection_type == SELECTION_TYPE_CLASS:
+                try:
+                    selection_raw = await self._api.get_class_guid(
+                        self._unit_guid, self._selection_value
+                    )
+                    _LOGGER.debug(
+                        "Class '%s' resolved to GUID: %s",
+                        self._selection_value,
+                        selection_raw,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "Could not resolve class '%s' to GUID: %s — "
+                        "using raw value (may return 0 lessons)",
+                        self._selection_value, exc,
+                    )
 
             school_year = await self._api.get_school_year()
 
             raw_lessons = await self._api.fetch_lessons(
                 selection_type=self._selection_type,
-                selection_raw=self._selection_value,
+                selection_raw=selection_raw,
                 unit_guid=self._unit_guid,
                 school_year=school_year,
                 weeks_past=WEEKS_PAST,
