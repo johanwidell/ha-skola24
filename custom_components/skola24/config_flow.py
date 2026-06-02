@@ -101,24 +101,36 @@ class Skola24ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
-            self._credentials[CONF_UNIT_GUID]   = user_input[CONF_UNIT_GUID]
+            self._credentials[CONF_UNIT_GUID]   = user_input[CONF_UNIT_GUID].strip()
             self._credentials[CONF_SCHOOL_NAME] = user_input.get(CONF_SCHOOL_NAME, "")
             return await self.async_step_selection()
 
         if not self._units:
-            # No units (shouldn't happen) — skip straight to selection
+            # No units returned — skip to selection (user can enter GUID manually)
+            _LOGGER.warning("get_units() returned empty list — skipping school step")
             return await self.async_step_selection()
 
-        # Build dropdown: "Skolnamn (unitId)" → unitGuid
-        unit_options: dict[str, str] = {
-            u["unitGuid"]: f"{u.get('unitId', u['unitGuid'])}"
+        # Use HA SelectSelector for a proper searchable dropdown
+        from homeassistant.helpers import selector as sel
+
+        options = [
+            sel.SelectOptionDict(
+                value=u["unitGuid"],
+                label=u.get("unitId", u["unitGuid"]),
+            )
             for u in self._units
             if u.get("unitGuid")
-        }
+        ]
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_UNIT_GUID): vol.In(unit_options),
+                vol.Required(CONF_UNIT_GUID): sel.SelectSelector(
+                    sel.SelectSelectorConfig(
+                        options=options,
+                        mode=sel.SelectSelectorMode.DROPDOWN,
+                        sort=True,
+                    )
+                ),
             }
         )
 
@@ -127,6 +139,7 @@ class Skola24ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             description_placeholders={
                 "count": str(len(self._units)),
+                "host":  self._credentials.get(CONF_HOST, ""),
             },
         )
 
@@ -140,8 +153,9 @@ class Skola24ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            selection_type  = user_input[CONF_SELECTION_TYPE]
+            selection_type  = int(user_input[CONF_SELECTION_TYPE])
             selection_value = user_input[CONF_SELECTION_VALUE].strip()
+            manual_guid     = user_input.get(CONF_UNIT_GUID, "").strip()
 
             if selection_type == SELECTION_TYPE_PIN:
                 clean = selection_value.replace("-", "")
@@ -158,16 +172,26 @@ class Skola24ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_SELECTION_TYPE:  selection_type,
                     CONF_SELECTION_VALUE: selection_value,
                 }
-                school = self._credentials.get(CONF_SCHOOL_NAME) or selection_value
+                # If manual GUID was provided, it overrides whatever school step set
+                if manual_guid:
+                    config[CONF_UNIT_GUID] = manual_guid
+
+                school = (
+                    self._credentials.get(CONF_SCHOOL_NAME)
+                    or manual_guid[:8]
+                    or selection_value
+                )
                 title = f"Skola24 {self._credentials[CONF_HOST].split('.')[0].capitalize()} — {school}"
                 return self.async_create_entry(title=title, data=config)
 
         schema = vol.Schema(
             {
                 vol.Required(CONF_SELECTION_TYPE, default=SELECTION_TYPE_PIN): vol.In(
-                    SELECTION_TYPE_LABELS
+                    list(SELECTION_TYPE_LABELS.keys())
                 ),
                 vol.Required(CONF_SELECTION_VALUE): str,
+                # Manual override: paste GUID here if the school dropdown is skipped
+                vol.Optional(CONF_UNIT_GUID, default=""): str,
             }
         )
 
